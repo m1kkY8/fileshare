@@ -1,100 +1,61 @@
 package main
 
 import (
-	"flag"
-	"fmt"
-	"io"
+	"fileshare-client/src/ack"
+	"fileshare-client/src/config"
+	"fileshare-client/src/entity"
+	"fileshare-client/src/receiver"
 	"log"
 	"net"
-	"os"
-
-	"github.com/vmihailenco/msgpack/v5"
+	"time"
 )
 
-type Status struct {
-	Status string `msgpack:"status"`
-}
-
-type Handshake struct {
-	Intent   string `msgpack:"intent"`   // r for receive, s for send
-	Keyword  string `msgpack:"keyword"`  // keyword used for pairing clients
-	FileName string `msgpack:"filename"` // r for receive, s for send
-	FileSize int64  `msgpack:"filesize"` // r for receive, s for send
-}
-
 func main() {
-	// get prgram flags
-	serverAddr := flag.String("h", "127.0.0.1", "Server addres")
-	serverPort := flag.String("p", "9001", "Server port")
-	keyword := flag.String("word", "amogus", "Keyword used for establishing connection")
-	intent := flag.String("a", "send", "(s)end or (r)eceive")
-	fileName := flag.String("file", "", "File for sending ")
-
-	flag.Parse()
-
-	// parse tcp server address
-	fullAdrr := fmt.Sprintf("%s:%s", *serverAddr, *serverPort)
+	config := config.LoadConfig()
 
 	// connect to server
-	connection, err := net.Dial("tcp", fullAdrr)
+	connection, err := net.Dial("tcp", config.TCPAddr)
 	if err != nil {
 		log.Printf("error connecting to server %v", err)
 	}
 
-	// pack handshake
-	handshake := Handshake{
-		Intent:   *intent,
-		Keyword:  *keyword,
-		FileName: *fileName,
-	}
+	// Make handshake
+	handshake := entity.CreateHandshake(config)
 
-	handshakeBytes, err := msgpack.Marshal(handshake)
+	// Marshal and send handshake
+	handshakeBytes, err := entity.MarshalHandshake(handshake)
 	if err != nil {
 		log.Printf("error marshaling handshake %v", err)
 	}
 
-	_, err = connection.Write(handshakeBytes)
+	err = entity.SendHandshake(connection, handshakeBytes)
 	if err != nil {
-		log.Printf("error writing to connection %v", err)
+		log.Printf("error sending handshake %v", err)
 	}
 
 	// send file
-	if *intent == "s" {
-		file, err := os.Open(*fileName)
-		if err != nil {
-			log.Printf("error opening file %v", err)
+	if config.Intent == "s" {
+		for {
+			if connection != nil {
+				ack, err := ack.ReceiveAck(connection)
+				if err != nil {
+					break
+				}
+
+				log.Println(ack.Ready)
+				log.Println(ack.Message)
+
+				time.Sleep(5 * time.Second)
+			} else {
+				return
+			}
 		}
 
-		defer file.Close()
-		log.Println("File sent successfully")
-
-		_, err = io.Copy(connection, file)
-		if err != nil {
-			log.Printf("error writing to conn %v", err)
-			return
-		}
-
-		connection.Close()
-		return
+		// sender.SendFile(config.FileName, connection)
 	}
 
 	// receive file
-	if *intent == "r" {
-		file, err := os.Create(*fileName)
-		if err != nil {
-			log.Printf("error creating file %v", err)
-			return
-		}
-
-		_, err = io.Copy(file, connection)
-		if err != nil {
-			log.Printf("error writing to file %v", err)
-			return
-		}
-
-		file.Close()
-		fmt.Println("transfer completed")
-		connection.Close()
-		return
+	if config.Intent == "r" {
+		receiver.ReceiveFile(connection)
 	}
 }
