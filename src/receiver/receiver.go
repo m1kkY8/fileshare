@@ -1,6 +1,7 @@
 package receiver
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -9,13 +10,18 @@ import (
 )
 
 func ReceiveFile(conn net.Conn) {
+	var fileSize int64
+
+	binary.Read(conn, binary.LittleEndian, &fileSize)
+	log.Printf("fileSize %d", fileSize)
+
 	file, err := os.Create("amogus")
 	if err != nil {
 		log.Printf("error creating file %v", err)
 		return
 	}
 
-	_, err = io.Copy(file, conn)
+	_, err = io.CopyN(file, conn, fileSize)
 	if err != nil {
 		log.Printf("error writing to file %v", err)
 		return

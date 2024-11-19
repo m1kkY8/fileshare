@@ -5,16 +5,16 @@ import (
 	"fileshare-client/src/config"
 	"fileshare-client/src/entity"
 	"fileshare-client/src/receiver"
+	"fileshare-client/src/sender"
 	"log"
 	"net"
-	"time"
 )
 
 func main() {
 	config := config.LoadConfig()
 
 	// connect to server
-	connection, err := net.Dial("tcp", config.TCPAddr)
+	conn, err := net.Dial("tcp", config.TCPAddr)
 	if err != nil {
 		log.Printf("error connecting to server %v", err)
 	}
@@ -23,39 +23,55 @@ func main() {
 	handshake := entity.CreateHandshake(config)
 
 	// Marshal and send handshake
-	handshakeBytes, err := entity.MarshalHandshake(handshake)
-	if err != nil {
-		log.Printf("error marshaling handshake %v", err)
-	}
-
-	err = entity.SendHandshake(connection, handshakeBytes)
-	if err != nil {
-		log.Printf("error sending handshake %v", err)
-	}
 
 	// send file
 	if config.Intent == "s" {
+		fileSize, err := sender.GetSize(handshake.FileName)
+		handshake.FileSize = fileSize
+
+		log.Println(fileSize)
+
+		handshakeBytes, err := entity.MarshalHandshake(handshake)
+		if err != nil {
+			log.Printf("error marshaling handshake %v", err)
+		}
+
+		err = entity.SendHandshake(conn, handshakeBytes)
+		if err != nil {
+			log.Printf("error sending handshake %v", err)
+		}
+
+		// wait for ack
 		for {
-			if connection != nil {
-				ack, err := ack.ReceiveAck(connection)
+			if conn != nil {
+				ack, err := ack.ReceiveAck(conn)
 				if err != nil {
 					break
 				}
 
 				log.Println(ack.Ready)
 				log.Println(ack.Message)
-
-				time.Sleep(5 * time.Second)
+				break
 			} else {
 				return
 			}
 		}
 
-		// sender.SendFile(config.FileName, connection)
+		sender.SendFile(handshake.FileName, fileSize, conn)
 	}
 
 	// receive file
 	if config.Intent == "r" {
-		receiver.ReceiveFile(connection)
+		handshakeBytes, err := entity.MarshalHandshake(handshake)
+		if err != nil {
+			log.Printf("error marshaling handshake %v", err)
+		}
+
+		err = entity.SendHandshake(conn, handshakeBytes)
+		if err != nil {
+			log.Printf("error sending handshake %v", err)
+		}
+
+		receiver.ReceiveFile(conn)
 	}
 }
